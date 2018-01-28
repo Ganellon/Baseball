@@ -12,6 +12,8 @@ import android.view.View;
 import android.widget.Button;
 import android.widget.TextView;
 
+import java.util.Arrays;
+
 public class BaseballActivity extends AppCompatActivity {
 
     /** GLOBAL CONSTANTS  **/
@@ -48,6 +50,10 @@ public class BaseballActivity extends AppCompatActivity {
     private int strikes = 0;
     // number of outs in the game so far -- NOTE: this is a running total!
     private int outs = 0;
+    // running total scores for each team, rather than calculate every time there is an update
+    private int[] totals;
+    // flag to determine whether the game is in extra innings
+    private boolean extraInnings = false;
 
     // set up menu
     @Override
@@ -92,6 +98,7 @@ public class BaseballActivity extends AppCompatActivity {
     // reset the score array, global variables
     private void newGame() {
         score = new int[TEAMS][INNINGS_PER_GAME];
+        totals = new int [TEAMS];
         // reset the inning, outs, and batter stats
         half = 0;
         outs = 0;
@@ -118,8 +125,11 @@ public class BaseballActivity extends AppCompatActivity {
         scoreBoardControls[half][outs / OUTS_PER_INNING].setBackgroundResource(R.drawable.rectangle_red);
 
         // set all the innings labels back to default in case prior game had extra innings
-        for (int i = 0; i < INNINGS_PER_GAME; i++) {
-            inningLabels[i].setText(String.valueOf(i+1));
+        if (extraInnings) {
+            for (int i = 0; i < INNINGS_PER_GAME; i++) {
+                inningLabels[i].setText(String.valueOf(i + 1));
+            }
+            extraInnings = false;
         }
 
         // reset the batter stats
@@ -190,7 +200,7 @@ public class BaseballActivity extends AppCompatActivity {
 
     }
 
-    // reset the variables to 0, update the ball/strikes TextViess
+    // reset the variables to 0, update the ball/strikes TextViews
     private void resetBatter() {
         balls = 0;
         strikes = 0;
@@ -229,18 +239,25 @@ public class BaseballActivity extends AppCompatActivity {
     public void scoreRun(View view) {
         // Do nothing if the game is over
         ++score[half][outs / OUTS_PER_INNING];
+        ++totals[half];
         updateScore();
     }
 
     // update the inning half score and total score
     private void updateScore() {
-        int index = outs / OUTS_PER_INNING;
-        scoreBoardControls[half][index].setText(String.valueOf(score[half][index]));
+        int inningSet = outs / OUTS_PER_GAME;
+        int index = (outs / OUTS_PER_INNING);
+        // get an index to a control with a delta of inningSet
+        int inning = index - (inningSet * INNINGS_PER_GAME);
+        scoreBoardControls[half][inning].setText(String.valueOf(score[half][index]));
+
+/*      Decided this loop has to go
         int tempScore = 0;
         for (int i = 0; i < score[half].length; i++) {
             tempScore += score[half][i];
         }
-        totalScores[half].setText(String.valueOf(tempScore));
+*/
+        totalScores[half].setText(String.valueOf(totals[half]));
         // don't update anything except the score
     }
 
@@ -255,19 +272,68 @@ public class BaseballActivity extends AppCompatActivity {
         ++outs;
         updateOuts();
 
-        // check to see if game is over
-        if ((outs >= OUTS_PER_GAME) && !gameTied()) {
-            gameOver();
-            return;
-        }
-
         if (outs % OUTS_PER_SIDE == 0) {
             // Go to next (half) inning
             half ^= 1;
             resetBatter();
         }
+        // check to see if game is over
+        boolean tieScore = gameTied();
+        boolean maxOuts = outs >= OUTS_PER_GAME;
+        int inning = outs % OUTS_PER_INNING;
+
+        if (inning == 0) { // top of the next inning
+            if (maxOuts && !tieScore) {
+                gameOver();
+                return;
+            }
+            else if (maxOuts) { // extra innings
+                // flag for resetting the innings labels when creating a new game
+                extraInnings = true;
+
+                if (score[0].length <= outs / OUTS_PER_INNING) { // have to resize
+                    resizeScoreArray();
+                    // change the display labels to match the extra innings
+                    updateInningLabels();
+                    // reset all the innings to zeros
+                    resetInningScores();
+                }
+            }
+        }
         setBorderColor();
         updateBatterDisplay();
+    }
+
+    // resize the score arrays to hold all the new inning scores
+    private void resizeScoreArray() {
+        score[teams.TEAMA.ordinal()] =
+                Arrays.copyOf(score[teams.TEAMA.ordinal()],
+                        score[teams.TEAMA.ordinal()].length + INNINGS_PER_GAME);
+
+        score[teams.TEAMB.ordinal()] =
+                Arrays.copyOf(score[teams.TEAMB.ordinal()],
+                        score[teams.TEAMB.ordinal()].length + INNINGS_PER_GAME);
+    }
+
+    // for extra innings, set all the inning TextView controls to "0" and background to grey
+    private void resetInningScores() {
+        // set all the rectangles to grey for the next set of innings
+        for (int i = 0; i < TEAMS; i++) {
+            for (TextView control : scoreBoardControls[i]) {
+                control.setText("0");
+                control.setBackgroundResource(R.drawable.rectangle_gray);
+            }
+        }
+    }
+
+    // this changes all the "innings" labels above each inning score to reflect extra innings
+    private void updateInningLabels() {
+        // get the max value of the next set of innings
+        int i = INNINGS_PER_GAME + ((outs / OUTS_PER_GAME) * INNINGS_PER_GAME);
+        // change the inning labels from right to left, max to max - INNINGS_PER_GAME
+        for (int j = INNINGS_PER_GAME-1; j >=0; i--, j-- ) {
+            inningLabels[j].setText(String.valueOf(i));
+        }
     }
 
     // game is over; disable the buttons until new game is created
@@ -282,17 +348,22 @@ public class BaseballActivity extends AppCompatActivity {
 
     // see if the game is tied
     private boolean gameTied() {
-        return (Integer.parseInt(totalScores[teams.TEAMA.ordinal()].getText().toString()) ==
-                Integer.parseInt(totalScores[teams.TEAMB.ordinal()].getText().toString()));
+        return totals[teams.TEAMA.ordinal()] == totals[teams.TEAMB.ordinal()];
     }
 
     // set the border color for one TextView to red
     private void setBorderColor() {
-        scoreBoardControls[half][outs / OUTS_PER_INNING].setBackgroundResource(R.drawable.rectangle_red);
+        int inningSet = outs / OUTS_PER_GAME;
+        // get an index to a control with a delta of inningSet
+        int inning = (outs / OUTS_PER_INNING) - (inningSet * INNINGS_PER_GAME);
+        scoreBoardControls[half][inning].setBackgroundResource(R.drawable.rectangle_red);
     }
 
     // set the border color for one TextView to gray
     private void unsetBorderColor() {
-        scoreBoardControls[half][outs / OUTS_PER_INNING].setBackgroundResource(R.drawable.rectangle_gray);
+        int inningSet = outs / OUTS_PER_GAME;
+        // get an index to a control with a delta of inningSet
+        int inning = (outs / OUTS_PER_INNING) - (inningSet * INNINGS_PER_GAME);
+        scoreBoardControls[half][inning].setBackgroundResource(R.drawable.rectangle_gray);
     }
 }
